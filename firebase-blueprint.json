@@ -1,0 +1,515 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated user account and RBAC permissions",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "employee", "pending"] },
+        "status": { "type": "string", "enum": ["active", "suspended", "pending"] },
+        "permissions": { "type": "object" },
+        "inviteId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "status", "permissions", "createdAt", "updatedAt"]
+    },
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted marker document for admin role verification",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "StaffInvite": {
+      "title": "StaffInvite",
+      "description": "Pre-authorized staff invitation and permission template",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin", "employee"] },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "permissions": { "type": "object" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "name", "role", "status", "permissions", "createdBy", "createdAt", "updatedAt"]
+    },
+    "DeviceRecord": {
+      "title": "DeviceRecord",
+      "description": "Registered terminal device (phone, tablet, PC) monitored and controlled by admin",
+      "type": "object",
+      "properties": {
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deviceType": { "type": "string", "enum": ["mobile", "tablet", "desktop"] },
+        "platform": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "userName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "userEmail": { "type": "string", "format": "email", "maxLength": 200 },
+        "userRole": { "type": "string", "enum": ["admin", "employee"] },
+        "status": { "type": "string", "enum": ["active", "blocked"] },
+        "lastOperationSummary": { "type": "string", "maxLength": 240 },
+        "lastActiveAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["deviceId", "deviceName", "deviceType", "platform", "userId", "userName", "userEmail", "userRole", "status", "lastActiveAt", "createdAt", "updatedAt"]
+    },
+    "ProcessedOperation": {
+      "title": "ProcessedOperation",
+      "description": "Immutable idempotency lock preventing duplicate operations across offline retries",
+      "type": "object",
+      "properties": {
+        "operationId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "operationType": { "type": "string", "enum": ["sale", "purchase", "return", "voucher", "expense", "stock_adjust", "cash_adjust"] },
+        "referenceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "referenceNumber": { "type": "string", "maxLength": 40 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["operationId", "operationType", "referenceId", "employeeId", "deviceId", "deviceName", "createdAt"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Store profile and display configuration",
+      "type": "object",
+      "properties": {
+        "storeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "address": { "type": "string", "maxLength": 240 },
+        "currency": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "receiptFooter": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["storeName", "currency", "updatedAt"]
+    },
+    "Counters": {
+      "title": "Counters",
+      "description": "Sequential document numbering and cash box balance",
+      "type": "object",
+      "properties": {
+        "nextProductSeq": { "type": "number" },
+        "nextCustomerSeq": { "type": "number" },
+        "nextSupplierSeq": { "type": "number" },
+        "nextInvoiceSeq": { "type": "number" },
+        "nextPurchaseSeq": { "type": "number" },
+        "nextReturnSeq": { "type": "number" },
+        "nextVoucherSeq": { "type": "number" },
+        "cashBalance": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "nextProductSeq",
+        "nextCustomerSeq",
+        "nextSupplierSeq",
+        "nextInvoiceSeq",
+        "nextPurchaseSeq",
+        "nextReturnSeq",
+        "nextVoucherSeq",
+        "cashBalance",
+        "updatedAt"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Store inventory item with unique code and pricing",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "barcode": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 400 },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "costPrice": { "type": "number" },
+        "sellPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "name", "category", "unit", "costPrice", "sellPrice", "stock", "minStock", "isActive", "createdBy", "createdAt", "updatedAt"]
+    },
+    "ProductCodeIndex": {
+      "title": "ProductCodeIndex",
+      "description": "Uniqueness lock document for product codes",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "productId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["code", "productId", "createdAt"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer directory and credit balance",
+      "type": "object",
+      "properties": {
+        "customerCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "address": { "type": "string", "maxLength": 240 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "totalPurchases": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerCode", "name", "totalPurchases", "totalPaid", "balanceDue", "createdBy", "createdAt", "updatedAt"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "Supplier directory and payables balance",
+      "type": "object",
+      "properties": {
+        "supplierCode": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "address": { "type": "string", "maxLength": 240 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "totalPurchases": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "balanceDue": { "type": "number" },
+        "createdBy": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["supplierCode", "name", "totalPurchases", "totalPaid", "balanceDue", "createdBy", "createdAt", "updatedAt"]
+    },
+    "SaleInvoice": {
+      "title": "SaleInvoice",
+      "description": "Point of sale invoice with itemized breakdown, device attribution, and profit calculation",
+      "type": "object",
+      "properties": {
+        "invoiceNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "operationId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerCode": { "type": "string", "maxLength": 40 },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "items": { "type": "array" },
+        "subtotal": { "type": "number" },
+        "discount": { "type": "number" },
+        "total": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "netProfit": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "credit", "partial"] },
+        "status": { "type": "string", "enum": ["completed", "partial_return", "returned", "cancelled"] },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "invoiceNumber",
+        "employeeId",
+        "employeeName",
+        "customerName",
+        "items",
+        "subtotal",
+        "discount",
+        "total",
+        "paidAmount",
+        "remainingAmount",
+        "totalCost",
+        "netProfit",
+        "paymentMethod",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PurchaseInvoice": {
+      "title": "PurchaseInvoice",
+      "description": "Supplier purchase invoice increasing stock",
+      "type": "object",
+      "properties": {
+        "purchaseNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "supplierId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "supplierCode": { "type": "string", "maxLength": 40 },
+        "supplierName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "operationId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "items": { "type": "array" },
+        "total": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["cash", "credit", "partial"] },
+        "status": { "type": "string", "enum": ["completed", "cancelled"] },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "purchaseNumber",
+        "supplierId",
+        "supplierName",
+        "employeeId",
+        "employeeName",
+        "items",
+        "total",
+        "paidAmount",
+        "remainingAmount",
+        "paymentMethod",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SalesReturn": {
+      "title": "SalesReturn",
+      "description": "Customer return record linked to an existing sale invoice",
+      "type": "object",
+      "properties": {
+        "returnNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "saleId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "invoiceNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "operationId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "items": { "type": "array" },
+        "refundAmount": { "type": "number" },
+        "returnedCost": { "type": "number" },
+        "returnedProfit": { "type": "number" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "restockValid": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "returnNumber",
+        "saleId",
+        "invoiceNumber",
+        "customerName",
+        "employeeId",
+        "employeeName",
+        "items",
+        "refundAmount",
+        "returnedCost",
+        "returnedProfit",
+        "reason",
+        "restockValid",
+        "createdAt"
+      ]
+    },
+    "StockMovement": {
+      "title": "StockMovement",
+      "description": "Immutable stock change and stocktaking audit entry",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "productCode": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "productName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "type": { "type": "string", "enum": ["sale", "purchase", "return", "in", "out", "stocktake", "cancel_restore"] },
+        "qtyChange": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" },
+        "referenceType": { "type": "string", "maxLength": 40 },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "referenceNumber": { "type": "string", "maxLength": 40 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "productId",
+        "productCode",
+        "productName",
+        "type",
+        "qtyChange",
+        "previousStock",
+        "newStock",
+        "reason",
+        "employeeId",
+        "employeeName",
+        "createdAt"
+      ]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Store operating expense record",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "amount": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 300 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "operationId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "amount", "employeeId", "employeeName", "createdAt"]
+    },
+    "Voucher": {
+      "title": "Voucher",
+      "description": "Customer receipt voucher or supplier payment voucher",
+      "type": "object",
+      "properties": {
+        "voucherNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "type": { "type": "string", "enum": ["receipt", "payment"] },
+        "partyType": { "type": "string", "enum": ["customer", "supplier"] },
+        "partyId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "partyName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "amount": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 300 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "operationId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["voucherNumber", "type", "partyType", "partyId", "partyName", "amount", "employeeId", "employeeName", "createdAt"]
+    },
+    "CashTransaction": {
+      "title": "CashTransaction",
+      "description": "Cash box inflow and outflow ledger entry",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["in", "out"] },
+        "category": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "amount": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "referenceNumber": { "type": "string", "maxLength": 40 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "category", "amount", "balanceAfter", "description", "employeeId", "employeeName", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable security and operational audit log",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "entityType": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "entityId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "actorId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "actorName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "actorRole": { "type": "string", "enum": ["admin", "employee"] },
+        "deviceId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "deviceName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "entityType", "entityId", "summary", "actorId", "actorName", "actorRole", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User accounts, roles, and active status"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Admin role index"
+    },
+    "/staff_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/StaffInvite" },
+      "description": "Admin-created staff invitations"
+    },
+    "/devices/{deviceId}": {
+      "schema": { "$ref": "#/entities/DeviceRecord" },
+      "description": "Registered terminal devices monitored and controlled by admin"
+    },
+    "/processed_operations/{operationId}": {
+      "schema": { "$ref": "#/entities/ProcessedOperation" },
+      "description": "Idempotency registry preventing duplicate transactions on reconnect"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/StoreSettings" },
+      "description": "Store settings"
+    },
+    "/counters/{counterId}": {
+      "schema": { "$ref": "#/entities/Counters" },
+      "description": "Sequential invoice/entity counters and cash box balance"
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Store product catalog"
+    },
+    "/product_codes/{codeId}": {
+      "schema": { "$ref": "#/entities/ProductCodeIndex" },
+      "description": "Product code uniqueness registry"
+    },
+    "/customers/{customerId}": {
+      "schema": { "$ref": "#/entities/Customer" },
+      "description": "Customer directory and credit ledger"
+    },
+    "/suppliers/{supplierId}": {
+      "schema": { "$ref": "#/entities/Supplier" },
+      "description": "Supplier directory and payables ledger"
+    },
+    "/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/SaleInvoice" },
+      "description": "Sales invoices"
+    },
+    "/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/PurchaseInvoice" },
+      "description": "Purchase invoices"
+    },
+    "/returns/{returnId}": {
+      "schema": { "$ref": "#/entities/SalesReturn" },
+      "description": "Customer returns"
+    },
+    "/stock_movements/{movementId}": {
+      "schema": { "$ref": "#/entities/StockMovement" },
+      "description": "Inventory movement and stocktake log"
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "Store expenses"
+    },
+    "/vouchers/{voucherId}": {
+      "schema": { "$ref": "#/entities/Voucher" },
+      "description": "Receipt and payment vouchers"
+    },
+    "/cash_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/CashTransaction" },
+      "description": "Cash box transaction ledger"
+    },
+    "/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable audit trail"
+    }
+  }
+}

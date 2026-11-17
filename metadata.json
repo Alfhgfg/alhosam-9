@@ -1,0 +1,6 @@
+{
+  "name": "بقالة الحسام - النظام المحاسبي",
+  "description": "نظام محاسبي متكامل لإدارة المحلات التجارية ونقاط البيع والمخزون والعملاء والموردين والحسابات المالية",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

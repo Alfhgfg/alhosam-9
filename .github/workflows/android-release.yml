@@ -1,0 +1,268 @@
+name: Android Release Build (APK & AAB)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - 'public/downloads/**'
+      - '**.md'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'إنشاء GitHub Release وإرفاق APK و AAB'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    name: Build Signed APK & AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('package.json', 'package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: Setup Java 21 (Temurin)
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Android SDK (Platform 36 & Build-Tools 35.0.0)
+        run: |
+          ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          mkdir -p "$ANDROID_SDK"
+          if [ ! -w "$ANDROID_SDK" ] && command -v sudo >/dev/null 2>&1; then
+            sudo chown -R "$(id -u):$(id -g)" "$ANDROID_SDK"
+          fi
+
+          SDKMANAGER=""
+          for candidate in \
+            "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" \
+            "$ANDROID_SDK"/cmdline-tools/*/bin/sdkmanager \
+            "$(command -v sdkmanager 2>/dev/null || true)"; do
+            if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+              SDKMANAGER="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Downloading Android command-line tools..."
+            mkdir -p "$ANDROID_SDK/cmdline-tools"
+            curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip
+            unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-extract
+            rm -rf "$ANDROID_SDK/cmdline-tools/latest"
+            mv /tmp/cmdline-extract/cmdline-tools "$ANDROID_SDK/cmdline-tools/latest"
+            rm -rf /tmp/cmdline-tools.zip /tmp/cmdline-extract
+            SDKMANAGER="$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_SDK" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$ANDROID_SDK" "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+          echo "ANDROID_HOME=$ANDROID_SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK" >> "$GITHUB_ENV"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+      - name: Setup Gradle Cache
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: 'on-success'
+
+      - name: Install Node Dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps --no-audit --no-fund
+          else
+            npm install --legacy-peer-deps --no-audit --no-fund
+          fi
+
+      - name: TypeScript Lint & Vite Production Build
+        run: |
+          npm run lint
+          npm run build
+
+      - name: Sync Capacitor Android Project
+        run: npx cap sync android
+
+      - name: Prepare Gradle Wrapper, Android SDK Path & Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          chmod +x android/gradlew
+          printf 'sdk.dir=%s\n' "${ANDROID_HOME}" > android/local.properties
+
+          if [ -n "${GOOGLE_SERVICES_JSON_BASE64:-}" ] && [ ! -s android/app/google-services.json ]; then
+            printf '%s' "${GOOGLE_SERVICES_JSON_BASE64}" | base64 -d > android/app/google-services.json
+          fi
+
+          if [ ! -s android/app/google-services.json ]; then
+            echo "::warning::android/app/google-services.json not found. Google Sign-In on Android requires google-services.json from Firebase Console."
+          fi
+
+          if [ -n "${KEYSTORE_BASE64:-}" ]; then
+            printf '%s' "${KEYSTORE_BASE64}" | base64 -d > android/alhussam-release.keystore
+          fi
+
+          if [ -n "${KEYSTORE_PASSWORD:-}" ] && [ -n "${KEY_ALIAS:-}" ] && [ -n "${KEY_PASSWORD:-}" ]; then
+            printf 'storeFile=alhussam-release.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "${KEYSTORE_PASSWORD}" "${KEY_ALIAS}" "${KEY_PASSWORD}" > android/keystore.properties
+          fi
+
+          test -s android/alhussam-release.keystore
+          test -s android/keystore.properties
+
+      - name: Build Signed Release APK & AAB
+        working-directory: android
+        run: |
+          ./gradlew assembleRelease bundleRelease \
+            --no-daemon \
+            --max-workers=1 \
+            -Dorg.gradle.jvmargs="-Xmx1536m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
+
+      - name: Verify APK & AAB Integrity, Signature, Package & Version
+        run: |
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          AAB_PATH="android/app/build/outputs/bundle/release/app-release.aab"
+
+          test -s "$APK_PATH"
+          test -s "$AAB_PATH"
+
+          BUILD_TOOLS_DIR=$(ls -d "${ANDROID_HOME}"/build-tools/* | sort -V | tail -n 1)
+          echo "Using build-tools at: $BUILD_TOOLS_DIR"
+
+          "$BUILD_TOOLS_DIR/apksigner" verify --verbose --print-certs "$APK_PATH" | tee /tmp/apksigner.txt
+
+          APK_CERT_SHA1=$(grep -m1 "Signer #1 certificate SHA-1 digest:" /tmp/apksigner.txt | awk '{print toupper($NF)}' | sed 's/../&:/g;s/:$//' || true)
+          APK_CERT_SHA256=$(grep -m1 "Signer #1 certificate SHA-256 digest:" /tmp/apksigner.txt | awk '{print toupper($NF)}' | sed 's/../&:/g;s/:$//' || true)
+          echo "APK_CERT_SHA1=$APK_CERT_SHA1" >> "$GITHUB_ENV"
+          echo "APK_CERT_SHA256=$APK_CERT_SHA256" >> "$GITHUB_ENV"
+
+          if [ -s android/app/google-services.json ]; then
+            node -e '
+              const fs = require("fs");
+              const gs = JSON.parse(fs.readFileSync("android/app/google-services.json", "utf8"));
+              const projectId = gs?.project_info?.project_id || "";
+              const client = (gs?.client || []).find(c => c?.client_info?.android_client_info?.package_name === "com.alhussam.grocery");
+              const oauthClients = client?.oauth_client || [];
+              const hasAndroidOAuth = oauthClients.some(o => o.client_type === 1);
+              const hasWebOAuth = oauthClients.some(o => o.client_type === 3);
+              console.log("google-services.json project_id:", projectId, "matched package:", Boolean(client), "hasAndroidOAuth:", hasAndroidOAuth, "hasWebOAuth:", hasWebOAuth);
+              if (!client) throw new Error("google-services.json missing package com.alhussam.grocery");
+              if (!hasWebOAuth) throw new Error("google-services.json missing Web OAuth client (client_type 3)");
+            '
+          fi
+
+          "$BUILD_TOOLS_DIR/aapt2" dump badging "$APK_PATH" > /tmp/badging.txt
+          head -n 10 /tmp/badging.txt
+          grep -q "name='com.alhussam.grocery'" /tmp/badging.txt
+          grep -q "versionCode='1'" /tmp/badging.txt
+          grep -q "versionName='71.0.0'" /tmp/badging.txt
+
+          jarsigner -verify -certs "$AAB_PATH" > /tmp/jarsigner.txt
+          head -n 10 /tmp/jarsigner.txt
+          grep -q "jar verified." /tmp/jarsigner.txt
+
+          mkdir -p release-artifacts
+          cp "$APK_PATH" release-artifacts/app-release.apk
+          cp "$AAB_PATH" release-artifacts/app-release.aab
+          sha256sum release-artifacts/app-release.apk release-artifacts/app-release.aab > release-artifacts/SHA256SUMS.txt
+          ls -lh release-artifacts/
+          cat release-artifacts/SHA256SUMS.txt
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-release-apk
+          path: release-artifacts/app-release.apk
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload AAB Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-release-aab
+          path: release-artifacts/app-release.aab
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload Combined Release Bundle & Checksums
+        uses: actions/upload-artifact@v7
+        with:
+          name: alhussam-android-release
+          path: release-artifacts/
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Write Build Summary
+        run: |
+          APK_SIZE=$(stat -c%s release-artifacts/app-release.apk)
+          AAB_SIZE=$(stat -c%s release-artifacts/app-release.aab)
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "## بقالة الحسام - نتائج بناء Android"
+            echo ""
+            echo "- **Package Name:** \`com.alhussam.grocery\`"
+            echo "- **Version Name:** \`71.0.0\` (\`versionCode: 1\`)"
+            echo "- **APK Signing SHA-1:** \`${APK_CERT_SHA1:-N/A}\`"
+            echo "- **APK Signing SHA-256:** \`${APK_CERT_SHA256:-N/A}\`"
+            echo "- **google-services.json present:** \`$([ -s android/app/google-services.json ] && echo true || echo false)\`"
+            echo "- **APK Size:** \`${APK_SIZE}\` bytes"
+            echo "- **AAB Size:** \`${AAB_SIZE}\` bytes"
+            echo "- **Run & Artifacts URL:** ${RUN_URL}"
+            echo ""
+            echo "### SHA-256 Checksums"
+            echo '```'
+            cat release-artifacts/SHA256SUMS.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish GitHub Release (Optional on Manual Dispatch)
+        if: inputs.create_release == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ format('v71.0.0-run-{0}', github.run_number) }}
+          name: "بقالة الحسام v71.0.0"
+          files: |
+            release-artifacts/app-release.apk
+            release-artifacts/app-release.aab
+            release-artifacts/SHA256SUMS.txt

@@ -1,0 +1,31 @@
+import type { CapacitorConfig } from '@capacitor/cli';
+
+const config: CapacitorConfig = {
+  appId: 'com.alhussam.grocery',
+  appName: 'بقالة الحسام',
+  webDir: 'dist',
+  server: {
+    androidScheme: 'https',
+    allowNavigation: [
+      'accounts.google.com',
+      '*.google.com',
+      '*.googleusercontent.com',
+      '*.firebaseapp.com',
+      '*.googleapis.com',
+      '*.gstatic.com',
+    ],
+  },
+  android: {
+    allowMixedContent: false,
+    captureInput: true,
+    webContentsDebuggingEnabled: false,
+  },
+  plugins: {
+    FirebaseAuthentication: {
+      skipNativeAuth: true,
+      providers: ['google.com'],
+    },
+  },
+};
+
+export default config;
