@@ -638,6 +638,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const logout = async () => {
     if (Capacitor.isNativePlatform()) {
       await FirebaseAuthentication.signOut().catch(() => {});
+      try {
+        const bridge = (
+          window as unknown as {
+            AndroidFileBridge?: { clearLegacyGoogleSignIn?: () => void };
+          }
+        ).AndroidFileBridge;
+        bridge?.clearLegacyGoogleSignIn?.();
+      } catch {
+        // ignore native cleanup errors
+      }
     }
     await signOut(auth);
   };

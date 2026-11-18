@@ -174,6 +174,22 @@ public class MainActivity extends BridgeActivity {
         }
 
         @JavascriptInterface
+        public void clearLegacyGoogleSignIn() {
+            try {
+                Class<?> gsoClass = Class.forName("com.google.android.gms.auth.api.signin.GoogleSignInOptions");
+                Class<?> gsoBuilderClass = Class.forName("com.google.android.gms.auth.api.signin.GoogleSignInOptions$Builder");
+                Object defaultSignIn = gsoClass.getField("DEFAULT_SIGN_IN").get(null);
+                Object builder = gsoBuilderClass.getConstructor(gsoClass).newInstance(defaultSignIn);
+                Object gso = gsoBuilderClass.getMethod("build").invoke(builder);
+                Class<?> googleSignInClass = Class.forName("com.google.android.gms.auth.api.signin.GoogleSignIn");
+                Object client = googleSignInClass.getMethod("getClient", android.app.Activity.class, gsoClass).invoke(null, MainActivity.this, gso);
+                client.getClass().getMethod("signOut").invoke(client);
+            } catch (Throwable ignored) {
+                // Safe no-op if GoogleSignInClient is not initialized or Play Services is unavailable
+            }
+        }
+
+        @JavascriptInterface
         public boolean saveFile(String base64Data, String fileName, String mimeType) {
             try {
                 byte[] bytes = Base64.decode(base64Data, Base64.DEFAULT);
