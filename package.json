@@ -10,6 +10,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "cap:sync": "npm run build && npx cap sync android",
+    "android:verify-oauth": "node scripts/verify-android-oauth.mjs",
     "android:apk": "npm run cap:sync && cd android && ./gradlew assembleRelease --no-daemon --max-workers=1",
     "android:aab": "npm run cap:sync && cd android && ./gradlew bundleRelease --no-daemon --max-workers=1",
     "android:build": "npm run cap:sync && cd android && ./gradlew assembleRelease bundleRelease --no-daemon --max-workers=1"

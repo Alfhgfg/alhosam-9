@@ -57,6 +57,7 @@ interface AuthContextValue {
   loading: boolean;
   signingIn: boolean;
   authError: string | null;
+  authDiagnostic: string | null;
   isAdmin: boolean;
   isActiveStaff: boolean;
   deviceIdentity: DetectedDeviceMetadata;
@@ -70,6 +71,57 @@ interface AuthContextValue {
   ensureDeviceRegistered: () => Promise<DeviceRecord | null>;
 }
 
+interface AndroidOAuthDiagnostics {
+  packageName?: string;
+  defaultWebClientId?: string;
+  hasGoogleAppId?: boolean;
+  googleAppId?: string;
+  projectId?: string;
+  sha1?: string;
+  sha256?: string;
+  error?: string;
+}
+
+function readAndroidOAuthDiagnostics(): AndroidOAuthDiagnostics | null {
+  try {
+    const bridge = (
+      window as unknown as {
+        AndroidFileBridge?: { getOAuthDiagnostics?: () => string };
+      }
+    ).AndroidFileBridge;
+    if (!bridge || typeof bridge.getOAuthDiagnostics !== 'function') {
+      return null;
+    }
+    const raw = bridge.getOAuthDiagnostics();
+    if (!raw) return null;
+    return JSON.parse(raw) as AndroidOAuthDiagnostics;
+  } catch {
+    return null;
+  }
+}
+
+function formatAndroidDiagnosticSummary(
+  diag: AndroidOAuthDiagnostics | null,
+  rawErrors: string[]
+): string | null {
+  const parts: string[] = [];
+  if (diag) {
+    if (diag.packageName) parts.push(`Package: ${diag.packageName}`);
+    if (diag.sha1) parts.push(`SHA-1: ${diag.sha1}`);
+    if (diag.sha256) parts.push(`SHA-256: ${diag.sha256}`);
+    if (diag.defaultWebClientId) {
+      parts.push(`WebClientId: ${diag.defaultWebClientId}`);
+    } else {
+      parts.push('WebClientId: MISSING');
+    }
+    parts.push(`google-services.json(appId): ${diag.hasGoogleAppId ? 'OK' : 'MISSING'}`);
+  }
+  if (rawErrors.length > 0) {
+    parts.push(`Error: ${rawErrors.join(' | ')}`);
+  }
+  return parts.length > 0 ? parts.join('\n') : null;
+}
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
@@ -80,6 +132,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [loading, setLoading] = useState(true);
   const [signingIn, setSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authDiagnostic, setAuthDiagnostic] = useState<string | null>(null);
   const [deviceIdentity, setDeviceIdentity] = useState<DetectedDeviceMetadata>(() =>
     getLocalDeviceIdentity()
   );
@@ -117,6 +170,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
       setFirebaseUser(user);
       setAuthError(null);
+      setAuthDiagnostic(null);
 
       if (!user) {
         setProfile(null);
@@ -452,7 +506,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const signInWithGoogle = async () => {
     if (signingIn) return;
     setAuthError(null);
+    setAuthDiagnostic(null);
     setSigningIn(true);
+
+    const rawErrors: string[] = [];
 
     try {
       if (Capacitor.isNativePlatform()) {
@@ -466,12 +523,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         } catch (cmErr) {
           const cmMsg = cmErr instanceof Error ? cmErr.message : String(cmErr);
           const cmCode = String((cmErr as { code?: string | number })?.code || '');
+          const isTemporarilyBlocked = /temporarily blocked|16:/i.test(cmMsg);
           const isUserCanceled =
-            /cancel|12501|UserCanceled/i.test(cmMsg) || cmCode === '12501';
+            !isTemporarilyBlocked &&
+            (/12501|UserCanceled|GetCredentialCancellationException|activity is cancel|canceled by user|cancelled by user|sign_in_cancelled/i.test(
+              cmMsg
+            ) ||
+              cmCode === '12501');
           if (isUserCanceled) {
             return;
           }
-          // Fallback to legacy Google Sign-In client if Credential Manager is unavailable on this device
+          rawErrors.push(`CM(${cmCode || 'err'}): ${cmMsg}`);
+          // Fallback to legacy Google Sign-In client if Credential Manager is unavailable or misconfigured on this device
           const fallbackRes = await FirebaseAuthentication.signInWithGoogle({
             skipNativeAuth: true,
             useCredentialManager: false,
@@ -480,9 +543,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         }
 
         if (!idToken) {
+          const diag = readAndroidOAuthDiagnostics();
           setAuthError(
             'لم يُعد مزود Google رمز التحقق (ID Token). تأكد من مطابقة Web Client ID وملف google-services.json.'
           );
+          setAuthDiagnostic(formatAndroidDiagnosticSummary(diag, rawErrors));
           return;
         }
 
@@ -515,23 +580,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (err) {
       const code = String((err as { code?: string | number })?.code || '');
       const msg = err instanceof Error ? err.message : String(err);
-      if (/cancel|12501|UserCanceled/i.test(msg) || code === '12501') {
+      const isTemporarilyBlocked = /temporarily blocked|16:/i.test(msg);
+      if (
+        !isTemporarilyBlocked &&
+        (/12501|UserCanceled|GetCredentialCancellationException|activity is cancel|canceled by user|cancelled by user|sign_in_cancelled/i.test(
+          msg
+        ) ||
+          code === '12501')
+      ) {
         return;
       }
-      if (/10:|DEVELOPER_ERROR|12500/i.test(msg) || code === '10' || code === '12500') {
+
+      rawErrors.push(`Auth(${code || 'err'}): ${msg}`);
+      const diag = Capacitor.isNativePlatform() ? readAndroidOAuthDiagnostics() : null;
+      const combinedText = `${code} ${msg} ${rawErrors.join(' ')}`;
+
+      if (
+        /10:|DEVELOPER_ERROR|12500|28444|Developer console is not set up|GetCredentialProviderConfigurationException/i.test(
+          combinedText
+        ) ||
+        code === '10' ||
+        code === '12500'
+      ) {
         setAuthError(
-          'فشل تحقق OAuth على Android (خطأ DEVELOPER_ERROR): تأكد من تسجيل بصمة SHA-1 وSHA-256 واسم الحزمة com.alhussam.grocery في Firebase Console وتضمين google-services.json.'
+          'فشل تحقق OAuth على Android (خطأ DEVELOPER_ERROR): تأكد من تسجيل اسم الحزمة com.alhussam.grocery وبصمة التوقيع SHA-1 وSHA-256 في Firebase Console وتضمين google-services.json الصحيح.'
         );
-      } else if (/NoCredentialException|no credentials available/i.test(msg)) {
+        setAuthDiagnostic(formatAndroidDiagnosticSummary(diag, rawErrors));
+      } else if (
+        code === 'auth/invalid-credential' ||
+        code === 'auth/invalid-idp-response' ||
+        /audience|invalid idp/i.test(msg)
+      ) {
         setAuthError(
-          'لا يوجد حساب Google متاح أو فشل التحقق من إعدادات OAuth (تأكد من وجود حساب Google على الهاتف ومن مطابقة SHA-1 في Firebase).'
+          'رمز Google غير متطابق مع إعدادات Firebase Authentication (تحقق من تطابق Web Client ID في Firebase Console مع default_web_client_id).'
         );
+        setAuthDiagnostic(formatAndroidDiagnosticSummary(diag, rawErrors));
+      } else if (/NoCredentialException|no credentials available/i.test(combinedText)) {
+        setAuthError(
+          'لا يوجد حساب Google متاح أو تعذر التحقق من إعدادات OAuth (تأكد من وجود حساب Google على الهاتف ومن تسجيل بصمة SHA-1 في Firebase).'
+        );
+        setAuthDiagnostic(formatAndroidDiagnosticSummary(diag, rawErrors));
       } else if (/network|NETWORK_ERROR|7:/i.test(msg) || code === 'auth/network-request-failed') {
         setAuthError('تعذر الاتصال بالإنترنت. يرجى التحقق من الشبكة والمحاولة مرة أخرى.');
       } else if (code === 'auth/operation-not-allowed') {
         setAuthError('تسجيل الدخول عبر Google غير مفعّل في Firebase Authentication.');
       } else {
         setAuthError(`تعذر إتمام تسجيل الدخول عبر Google (${code || msg || 'خطأ غير معروف'}).`);
+        if (diag) {
+          setAuthDiagnostic(formatAndroidDiagnosticSummary(diag, rawErrors));
+        }
       }
     } finally {
       setSigningIn(false);
@@ -561,6 +658,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         loading,
         signingIn,
         authError,
+        authDiagnostic,
         isAdmin,
         isActiveStaff,
         deviceIdentity,

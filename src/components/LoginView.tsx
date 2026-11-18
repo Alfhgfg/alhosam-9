@@ -21,6 +21,7 @@ export const LoginView: React.FC = () => {
     loading,
     signingIn,
     authError,
+    authDiagnostic,
     isDeviceBlocked,
     deviceIdentity,
     deviceRecord,
@@ -261,8 +262,16 @@ export const LoginView: React.FC = () => {
           </div>
 
           {authError && (
-            <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-              {authError}
+            <div className="p-3.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm space-y-2">
+              <div>{authError}</div>
+              {authDiagnostic && (
+                <pre
+                  dir="ltr"
+                  className="text-[11px] leading-relaxed font-mono-num bg-white/80 border border-red-200 rounded-md p-2.5 text-red-800 whitespace-pre-wrap break-all select-all"
+                >
+                  {authDiagnostic}
+                </pre>
+              )}
             </div>
           )}
 

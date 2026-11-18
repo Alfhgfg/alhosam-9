@@ -184,11 +184,16 @@ jobs:
               const projectId = gs?.project_info?.project_id || "";
               const client = (gs?.client || []).find(c => c?.client_info?.android_client_info?.package_name === "com.alhussam.grocery");
               const oauthClients = client?.oauth_client || [];
-              const hasAndroidOAuth = oauthClients.some(o => o.client_type === 1);
-              const hasWebOAuth = oauthClients.some(o => o.client_type === 3);
-              console.log("google-services.json project_id:", projectId, "matched package:", Boolean(client), "hasAndroidOAuth:", hasAndroidOAuth, "hasWebOAuth:", hasWebOAuth);
+              const androidOAuthClients = oauthClients.filter(o => o.client_type === 1);
+              const webOAuthClients = oauthClients.filter(o => o.client_type === 3);
+              const apkSha1Normalized = (process.env.APK_CERT_SHA1 || "").replace(/:/g, "").toLowerCase();
+              const matchedCert = androidOAuthClients.some(o => (o?.android_info?.certificate_hash || "").replace(/:/g, "").toLowerCase() === apkSha1Normalized);
+              console.log("google-services.json project_id:", projectId, "matched package:", Boolean(client), "androidOAuthCount:", androidOAuthClients.length, "webOAuthCount:", webOAuthClients.length, "sha1Matched:", matchedCert);
+              if (projectId !== "dogwood-program-zw2pc") throw new Error("google-services.json project_id mismatch: expected dogwood-program-zw2pc, got " + projectId);
               if (!client) throw new Error("google-services.json missing package com.alhussam.grocery");
-              if (!hasWebOAuth) throw new Error("google-services.json missing Web OAuth client (client_type 3)");
+              if (androidOAuthClients.length === 0) throw new Error("google-services.json missing Android OAuth client (client_type 1). Add SHA-1 & SHA-256 in Firebase Console first.");
+              if (apkSha1Normalized && !matchedCert) throw new Error("google-services.json Android OAuth SHA-1 does not match APK signing SHA-1: " + process.env.APK_CERT_SHA1);
+              if (webOAuthClients.length === 0) throw new Error("google-services.json missing Web OAuth client (client_type 3)");
             '
           fi
 

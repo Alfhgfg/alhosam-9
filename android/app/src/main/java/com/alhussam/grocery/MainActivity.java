@@ -3,6 +3,9 @@ package com.alhussam.grocery;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -17,12 +20,17 @@ import android.widget.Toast;
 
 import com.getcapacitor.BridgeActivity;
 
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.security.MessageDigest;
 import java.util.List;
 
 public class MainActivity extends BridgeActivity {
+
+    private boolean webViewBridgeAttached = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -85,10 +93,86 @@ public class MainActivity extends BridgeActivity {
         cookieManager.setAcceptCookie(true);
         cookieManager.setAcceptThirdPartyCookies(webView, true);
 
-        webView.addJavascriptInterface(new AndroidFileBridge(), "AndroidFileBridge");
+        if (!webViewBridgeAttached) {
+            webView.addJavascriptInterface(new AndroidFileBridge(), "AndroidFileBridge");
+            webViewBridgeAttached = true;
+        }
+    }
+
+    private String computeCertFingerprint(byte[] certBytes, String algorithm) {
+        try {
+            MessageDigest md = MessageDigest.getInstance(algorithm);
+            byte[] digest = md.digest(certBytes);
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < digest.length; i++) {
+                if (i > 0) sb.append(':');
+                sb.append(String.format("%02X", digest[i] & 0xFF));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String getStringResourceOrEmpty(String resName) {
+        int resId = getResources().getIdentifier(resName, "string", getPackageName());
+        if (resId == 0) return "";
+        try {
+            return getString(resId);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private class AndroidFileBridge {
+        @JavascriptInterface
+        public String getOAuthDiagnostics() {
+            JSONObject obj = new JSONObject();
+            try {
+                String pkgName = getPackageName();
+                obj.put("packageName", pkgName);
+
+                String webClientId = getStringResourceOrEmpty("default_web_client_id");
+                String googleAppId = getStringResourceOrEmpty("google_app_id");
+                String projectId = getStringResourceOrEmpty("project_id");
+                obj.put("defaultWebClientId", webClientId);
+                obj.put("hasGoogleAppId", !googleAppId.isEmpty());
+                obj.put("googleAppId", googleAppId);
+                obj.put("projectId", projectId);
+
+                String sha1 = "";
+                String sha256 = "";
+                PackageManager pm = getPackageManager();
+                Signature[] signatures = null;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    PackageInfo pkgInfo = pm.getPackageInfo(pkgName, PackageManager.GET_SIGNING_CERTIFICATES);
+                    if (pkgInfo.signingInfo != null) {
+                        signatures = pkgInfo.signingInfo.hasMultipleSigners()
+                            ? pkgInfo.signingInfo.getApkContentsSigners()
+                            : pkgInfo.signingInfo.getSigningCertificateHistory();
+                    }
+                } else {
+                    @SuppressWarnings("deprecation")
+                    PackageInfo pkgInfo = pm.getPackageInfo(pkgName, PackageManager.GET_SIGNATURES);
+                    signatures = pkgInfo.signatures;
+                }
+                if (signatures != null && signatures.length > 0) {
+                    byte[] rawCert = signatures[0].toByteArray();
+                    sha1 = computeCertFingerprint(rawCert, "SHA-1");
+                    sha256 = computeCertFingerprint(rawCert, "SHA-256");
+                }
+                obj.put("sha1", sha1);
+                obj.put("sha256", sha256);
+            } catch (Exception e) {
+                try {
+                    obj.put("error", e.getMessage());
+                } catch (Exception ignored) {
+                    // ignore
+                }
+            }
+            return obj.toString();
+        }
+
         @JavascriptInterface
         public boolean saveFile(String base64Data, String fileName, String mimeType) {
             try {
